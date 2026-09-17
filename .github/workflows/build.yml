@@ -78,8 +78,21 @@ jobs:
           name: CustomMF-Windows
           path: dist
 
-      - name: Criar release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/CustomMF.exe
-          generate_release_notes: true
+      - name: Publicar no release (com retry)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          for i in 1 2 3; do
+            if gh release upload "${GITHUB_REF_NAME}" dist/CustomMF.exe --clobber; then
+              echo "upload ok"
+              break
+            fi
+            echo "tentativa $i falhou, aguardando…"
+            sleep 10
+          done
+          # garante existência do release e publica o rascunho
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" dist/CustomMF.exe --generate-notes
+          gh release edit "${GITHUB_REF_NAME}" --draft=false
+          gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name'
