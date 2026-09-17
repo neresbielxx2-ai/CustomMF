@@ -1,0 +1,111 @@
+name: Build CustomMF.exe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "arena/**"]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  smoke-test:
+    name: Autoteste (Windows)
+    runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Autoteste do núcleo
+        run: python run.py --selftest --no-ui
+
+      - name: Autoteste da interface (informativo)
+        continue-on-error: true
+        run: python run.py --selftest
+
+  build:
+    name: Compilar CustomMF.exe
+    needs: smoke-test
+    runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt "pyinstaller>=6.10"
+
+      - name: Compilar
+        run: pyinstaller --noconfirm --clean CustomMF.spec
+
+      - name: Verificar executável
+        run: |
+          if (!(Test-Path "dist/CustomMF.exe")) { throw "CustomMF.exe não foi gerado!" }
+          Get-Item dist/CustomMF.exe | Select-Object Name, Length
+
+      - name: Upload do artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: CustomMF-Windows
+          path: dist/CustomMF.exe
+          if-no-files-found: error
+
+  release:
+    name: Publicar release (tag v*)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: CustomMF-Windows
+          path: dist
+
+      - name: Publicar no release (com retry)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          main() {
+            if ! gh release view "$TAG" >/dev/null 2>&1; then
+              gh release create "$TAG" --title "Custom MF $TAG" --generate-notes || true
+            fi
+            ok=0
+            for i in 1 2 3 4 5; do
+              echo "upload tentativa $i…"
+              if gh release upload "$TAG" dist/CustomMF.exe --clobber; then ok=1; break; fi
+              sleep 8
+            done
+            gh release edit "$TAG" --draft=false || true
+            if [ "$ok" != "1" ]; then
+              echo "UPLOAD FALHOU apos retries"
+              return 1
+            fi
+            gh release view "$TAG" --json assets --jq '.assets[].name'
+            echo "publicado com sucesso"
+          }
+          main 2>&1 | tee /tmp/rel_debug.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" != "0" ]; then
+            gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+              -f body="Falha ao publicar release v1.1.0: $(head -c 3000 /tmp/rel_debug.log)" >/dev/null 2>&1 || true
+          fi
+          exit $rc
