@@ -78,21 +78,35 @@ jobs:
           name: CustomMF-Windows
           path: dist
 
-      - name: Publicar no release (com retry)
+      - name: Publicar no release (diagnóstico + retry)
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
-          set -e
-          for i in 1 2 3; do
-            if gh release upload "${GITHUB_REF_NAME}" dist/CustomMF.exe --clobber; then
-              echo "upload ok"
-              break
-            fi
-            echo "tentativa $i falhou, aguardando…"
-            sleep 10
+          S="$GITHUB_STEP_SUMMARY"
+          REL_ID=$(gh release view "$TAG" --json databaseId --jq .databaseId 2>/dev/null || true)
+          if [ -z "$REL_ID" ]; then
+            echo "release não existe; criando…" >> "$S"
+            gh release create "$TAG" --title "Custom MF $TAG" --generate-notes >> "$S" 2>&1 || true
+            REL_ID=$(gh release view "$TAG" --json databaseId --jq .databaseId 2>/dev/null || true)
+          fi
+          echo "release id: $REL_ID" >> "$S"
+          ok=0
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o /tmp/up.json -w "%{http_code}" -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @dist/CustomMF.exe \
+              "https://uploads.github.com/repos/$REPO/releases/$REL_ID/assets?name=CustomMF.exe")
+            echo "tentativa $i → HTTP $code · $(head -c 300 /tmp/up.json)" >> "$S"
+            [ "$code" = "201" ] && ok=1 && break
+            sleep 8
           done
-          # garante existência do release e publica o rascunho
-          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
-            gh release create "${GITHUB_REF_NAME}" dist/CustomMF.exe --generate-notes
-          gh release edit "${GITHUB_REF_NAME}" --draft=false
-          gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name'
+          gh release edit "$TAG" --draft=false >> "$S" 2>&1 || true
+          if [ "$ok" != "1" ]; then
+            echo "UPLOAD FALHOU apos retries" >> "$S"
+            exit 1
+          fi
+          echo "publicado com sucesso" >> "$S"
+          gh release view "$TAG" --json assets --jq '.assets[].name' >> "$S"
