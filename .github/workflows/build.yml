@@ -84,29 +84,38 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          S="$GITHUB_STEP_SUMMARY"
-          REL_ID=$(gh release view "$TAG" --json databaseId --jq .databaseId 2>/dev/null || true)
-          if [ -z "$REL_ID" ]; then
-            echo "release não existe; criando…" >> "$S"
-            gh release create "$TAG" --title "Custom MF $TAG" --generate-notes >> "$S" 2>&1 || true
-            REL_ID=$(gh release view "$TAG" --json databaseId --jq .databaseId 2>/dev/null || true)
-          fi
-          echo "release id: $REL_ID" >> "$S"
-          ok=0
-          for i in 1 2 3 4 5; do
-            code=$(curl -s -o /tmp/up.json -w "%{http_code}" -X POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary @dist/CustomMF.exe \
-              "https://uploads.github.com/repos/$REPO/releases/$REL_ID/assets?name=CustomMF.exe")
-            echo "tentativa $i → HTTP $code · $(head -c 300 /tmp/up.json)" >> "$S"
-            [ "$code" = "201" ] && ok=1 && break
-            sleep 8
-          done
-          gh release edit "$TAG" --draft=false >> "$S" 2>&1 || true
-          if [ "$ok" != "1" ]; then
-            echo "UPLOAD FALHOU apos retries" >> "$S"
-            exit 1
-          fi
-          echo "publicado com sucesso" >> "$S"
-          gh release view "$TAG" --json assets --jq '.assets[].name' >> "$S"
+          main() {
+            S="$GITHUB_STEP_SUMMARY"
+            echo "== inicio: TAG=$TAG REPO=$REPO ==" | tee -a "$S"
+            REL_ID=$(gh release view "$TAG" --json id --jq .id 2>&1 || true)
+            echo "view saida: $REL_ID" | tee -a "$S"
+            REL_ID=$(echo "$REL_ID" | grep -E '^[0-9]+$' || true)
+            if [ -z "$REL_ID" ]; then
+              echo "criando release…" | tee -a "$S"
+              OUT=$(gh release create "$TAG" --title "Custom MF $TAG" --generate-notes 2>&1) || true
+              echo "create saida: $OUT" | tee -a "$S"
+              REL_ID=$(gh release view "$TAG" --json id --jq .id 2>/dev/null || true)
+            fi
+            echo "release id: $REL_ID" | tee -a "$S"
+            ok=0
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /tmp/up.json -w "%{http_code}" -X POST \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary @dist/CustomMF.exe \
+                "https://uploads.github.com/repos/$REPO/releases/$REL_ID/assets?name=CustomMF.exe")
+              echo "upload tentativa $i HTTP $code $(head -c 300 /tmp/up.json)" | tee -a "$S"
+              [ "$code" = "201" ] && ok=1 && break
+              sleep 8
+            done
+            gh release edit "$TAG" --draft=false >> "$S" 2>&1 || true
+            if [ "$ok" != "1" ]; then
+              echo "UPLOAD FALHOU apos retries" | tee -a "$S"
+              return 1
+            fi
+            echo "publicado com sucesso" | tee -a "$S"
+          }
+          main 2>&1 | tee /tmp/rel_debug.log
+          rc=${PIPESTATUS[0]}
+          gh gist create /tmp/rel_debug.log -d "custommf-release-${GITHUB_RUN_ID}" >/dev/null 2>&1 || true
+          exit $rc
