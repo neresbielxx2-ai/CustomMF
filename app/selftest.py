@@ -183,6 +183,13 @@ def test_ui():
 
 
 def run_selftest(ui: bool = True) -> int:
+    # Console do Windows (cp1252) não tem ✔/✖ — força UTF-8 com fallback
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     print("Custom MF — autoteste")
     results = []
     _check("config", test_config, results)

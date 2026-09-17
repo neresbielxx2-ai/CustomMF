@@ -15,6 +15,9 @@ jobs:
   smoke-test:
     name: Autoteste (Windows)
     runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +39,9 @@ jobs:
     name: Compilar CustomMF.exe
     needs: smoke-test
     runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
