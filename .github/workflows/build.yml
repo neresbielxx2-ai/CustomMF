@@ -78,52 +78,34 @@ jobs:
           name: CustomMF-Windows
           path: dist
 
-      - name: Publicar no release (diagnóstico + retry)
+      - name: Publicar no release (com retry)
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           main() {
-            S="$GITHUB_STEP_SUMMARY"
-            echo "== inicio: TAG=$TAG REPO=$REPO ==" | tee -a "$S"
-            REL_ID=$(gh release view "$TAG" --json id --jq .id 2>&1 || true)
-            echo "view saida: $REL_ID" | tee -a "$S"
-            REL_ID=$(echo "$REL_ID" | grep -E '^[0-9]+$' || true)
-            if [ -z "$REL_ID" ]; then
-              echo "criando release…" | tee -a "$S"
-              OUT=$(gh release create "$TAG" --title "Custom MF $TAG" --generate-notes 2>&1) || true
-              echo "create saida: $OUT" | tee -a "$S"
-              REL_ID=$(gh release view "$TAG" --json id --jq .id 2>/dev/null || true)
+            if ! gh release view "$TAG" >/dev/null 2>&1; then
+              gh release create "$TAG" --title "Custom MF $TAG" --generate-notes || true
             fi
-            echo "release id: $REL_ID" | tee -a "$S"
             ok=0
             for i in 1 2 3 4 5; do
-              code=$(curl -s -o /tmp/up.json -w "%{http_code}" -X POST \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -H "Content-Type: application/octet-stream" \
-                --data-binary @dist/CustomMF.exe \
-                "https://uploads.github.com/repos/$REPO/releases/$REL_ID/assets?name=CustomMF.exe")
-              echo "upload tentativa $i HTTP $code $(head -c 300 /tmp/up.json)" | tee -a "$S"
-              [ "$code" = "201" ] && ok=1 && break
+              echo "upload tentativa $i…"
+              if gh release upload "$TAG" dist/CustomMF.exe --clobber; then ok=1; break; fi
               sleep 8
             done
-            gh release edit "$TAG" --draft=false >> "$S" 2>&1 || true
+            gh release edit "$TAG" --draft=false || true
             if [ "$ok" != "1" ]; then
-              echo "UPLOAD FALHOU apos retries" | tee -a "$S"
+              echo "UPLOAD FALHOU apos retries"
               return 1
             fi
-            echo "publicado com sucesso" | tee -a "$S"
+            gh release view "$TAG" --json assets --jq '.assets[].name'
+            echo "publicado com sucesso"
           }
           main 2>&1 | tee /tmp/rel_debug.log
           rc=${PIPESTATUS[0]}
-          {
-            echo "rc=$rc · SUMMARY=$GITHUB_STEP_SUMMARY"
-            echo "--- env ---"
-            env | grep -E "^(TAG=|REPO=|GITHUB_REF)" || true
-            echo "--- log ---"
-            head -c 60000 /tmp/rel_debug.log
-          } > /tmp/rel_comment.txt
-          gh api repos/$REPO/commits/$GITHUB_SHA/comments -f body="$(cat /tmp/rel_comment.txt)" >/dev/null 2>&1 || true
+          if [ "$rc" != "0" ]; then
+            gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+              -f body="Falha ao publicar release v1.1.0: $(head -c 3000 /tmp/rel_debug.log)" >/dev/null 2>&1 || true
+          fi
           exit $rc
