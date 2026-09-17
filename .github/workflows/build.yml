@@ -117,5 +117,12 @@ jobs:
           }
           main 2>&1 | tee /tmp/rel_debug.log
           rc=${PIPESTATUS[0]}
-          gh gist create /tmp/rel_debug.log -d "custommf-release-${GITHUB_RUN_ID}" >/dev/null 2>&1 || true
+          {
+            echo "rc=$rc · SUMMARY=$GITHUB_STEP_SUMMARY"
+            echo "--- env ---"
+            env | grep -E "^(TAG=|REPO=|GITHUB_REF)" || true
+            echo "--- log ---"
+            head -c 60000 /tmp/rel_debug.log
+          } > /tmp/rel_comment.txt
+          gh api repos/$REPO/commits/$GITHUB_SHA/comments -f body="$(cat /tmp/rel_comment.txt)" >/dev/null 2>&1 || true
           exit $rc
