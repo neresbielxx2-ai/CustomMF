@@ -8,10 +8,10 @@ from pathlib import Path
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
-from ...core import config, cursors, downloader, paths
+from ...core import config, cursors, curio, downloader
 from .. import widgets as W
 
-PREVIEW_PX = 60
+PREVIEW_PX = 44
 
 
 class MousePage:
@@ -25,68 +25,86 @@ class MousePage:
         self._hotspot = (0.0, 0.08)
         self._size = 34
         self._also_hand = tk.BooleanVar(value=False)
-        self._dl_status = {}
+        self._dl_status: dict[str, ctk.CTkLabel] = {}
 
     # ---------------------------------------------------------------- UI
 
     def build(self, parent):
         top = ctk.CTkFrame(parent, fg_color="transparent")
         top.pack(fill="x", padx=30, pady=(22, 6))
-        W.section_header(top, "🖱️", "Mouse",
-                         "Troque o cursor do sistema na hora (sem reiniciar). Antes de aplicar, "
-                         "salvamos seus cursores atuais — dá pra voltar quando quiser.").pack(side="left", fill="x", expand=True)
+        W.section_header(
+            top, "🖱️", "Mouse",
+            "Troque o cursor do sistema na hora (sem reiniciar). Antes de aplicar, "
+            "salvamos seus cursores atuais — dá para voltar quando quiser."
+        ).pack(side="left", fill="x", expand=True)
         btns = ctk.CTkFrame(top, fg_color="transparent")
-        btns.pack(side="right")
+        btns.pack(side="right", pady=(4, 0))
         W.ghost_button(btns, "📂 Importar .zip", self._import_zip).pack(side="left", padx=4)
         W.danger_button(btns, "↩ Padrão do Windows", self._restore_default).pack(side="left", padx=4)
 
-        self.grid_wrap = ctk.CTkScrollableFrame(parent, fg_color="transparent", height=380)
-        self.grid_wrap.pack(fill="both", expand=True, padx=24, pady=(4, 8))
+        self.grid_wrap = ctk.CTkScrollableFrame(parent, fg_color="transparent", height=360)
+        self.grid_wrap.pack(fill="both", expand=True, padx=24, pady=(4, 10))
         self._render_packs()
 
         # -------- cursor personalizado por imagem
         card = W.Card(parent)
-        card.pack(fill="x", padx=24, pady=(0, 20))
+        card.pack(fill="x", padx=24, pady=(0, 22))
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill="x", padx=18, pady=16)
 
         left = ctk.CTkFrame(inner, fg_color="transparent")
-        left.pack(side="left", padx=(0, 18))
-        ctk.CTkLabel(left, text="Sua imagem como cursor", font=W.fnt(13, "bold"),
-                     text_color=self.t["text"]).pack(anchor="w")
-        self.preview = tk.Canvas(left, width=140, height=140, bg=self.t["bg_deep"],
-                                 highlightthickness=1, highlightbackground=self.t["border"])
-        self.preview.pack(pady=8)
+        left.pack(side="left", padx=(0, 20))
+        ctk.CTkLabel(left, text="🖼️ Sua imagem como cursor", font=W.fnt(13, "bold"),
+                     text_color=self.t["text"]).pack(anchor="w", pady=(0, 8))
+        well = W.preview_well(left, 128)
+        well.pack()
+        self.preview = tk.Canvas(well, width=124, height=124, bg=self.t["bg_deep"],
+                                 highlightthickness=0)
+        self.preview.place(relx=0.5, rely=0.5, anchor="center")
         self.preview.bind("<Button-1>", self._pick_hotspot)
-        ctk.CTkLabel(left, text="clique na prévia para definir a ponta (hotspot)",
-                     font=W.fnt(10), text_color=self.t["sub"]).pack()
+        ctk.CTkLabel(left, text="clique na prévia para marcar a ponta (hotspot)",
+                     font=W.fnt(10), text_color=self.t["sub"]).pack(pady=(6, 0))
 
         right = ctk.CTkFrame(inner, fg_color="transparent")
         right.pack(side="left", fill="x", expand=True)
-        W.primary_button(right, "🖼️  Escolher imagem…", self._choose_image).pack(anchor="w")
-        self.file_lbl = ctk.CTkLabel(right, text="nenhuma imagem escolhida", font=W.fnt(11),
+        actions = ctk.CTkFrame(right, fg_color="transparent")
+        actions.pack(fill="x")
+        W.primary_button(actions, "🖼️  Escolher imagem…", self._choose_image).pack(side="left")
+        W.ghost_button(actions, " ↩ Padrão do Windows", self._restore_default).pack(side="left", padx=8)
+        self.file_lbl = ctk.CTkLabel(right, text="nenhuma imagem escolhida ainda", font=W.fnt(11),
                                      text_color=self.t["sub"], anchor="w")
-        self.file_lbl.pack(anchor="w", pady=(4, 10))
+        self.file_lbl.pack(anchor="w", pady=(8, 10))
         self.size_row = W.SliderRow(right, "Tamanho do cursor", 16, 96, self._size,
                                     fmt=lambda v: f"{int(v)} px", steps=80,
                                     command=self._on_size)
-        self.size_row.pack(fill="x", pady=(0, 6))
+        self.size_row.pack(fill="x", pady=(0, 8))
         hand_row = ctk.CTkFrame(right, fg_color="transparent")
-        hand_row.pack(fill="x", pady=(0, 10))
+        hand_row.pack(fill="x", pady=(0, 12))
         ctk.CTkSwitch(hand_row, text="usar também como mão (links)", variable=self._also_hand,
                       progress_color=self.t["accent"], font=W.fnt(12)).pack(side="left")
         self.apply_custom_btn = W.primary_button(right, "✅  Aplicar meu cursor",
                                                  self._apply_custom, state="disabled")
         self.apply_custom_btn.pack(anchor="w")
         self.custom_status = ctk.CTkLabel(right, text="", font=W.fnt(11), text_color=self.t["sub"])
-        self.custom_status.pack(anchor="w", pady=(4, 0))
+        self.custom_status.pack(anchor="w", pady=(5, 0))
         if config.get("cursor.custom_image"):
             try:
                 self._load_custom_image(config.get("cursor.custom_image"))
             except Exception:
                 pass
 
+        self._draw_preview()
+
     # ------------------------------------------------------------- packs
+
+    def _pack_card_visual(self, inner, emoji, title, subtitle):
+        t = self.t
+        well = W.preview_well(inner, 96)
+        well.pack(pady=(2, 8))
+        ctk.CTkLabel(well, text=emoji, font=W.fnt(36)).place(relx=0.5, rely=0.5, anchor="center")
+        ctk.CTkLabel(inner, text=title, font=W.fnt(13, "bold"), text_color=t["text"],
+                     wraplength=190).pack()
+        ctk.CTkLabel(inner, text=subtitle, font=W.fnt(10), text_color=t["sub"]).pack(pady=(1, 8))
 
     def _render_packs(self):
         for wdg in self.grid_wrap.winfo_children():
@@ -96,70 +114,81 @@ class MousePage:
         by_name = {p["name"].lower(): p for p in packs}
         active = (cursors.current_scheme() or "").lower()
 
-        cards = []
-        for p in packs:
-            cards.append(("pack", p))
-        for kd in cursors.KNOWN_DOWNLOADS:
-            if kd["title"].lower() not in by_name:
-                cards.append(("dl", kd))
+        cards: list[tuple[str, object]] = [("pack", p) for p in packs]
+        cards += [("dl", kd) for kd in cursors.KNOWN_DOWNLOADS
+                  if kd["title"].lower() not in by_name]
         cards.append(("default", None))
 
         cols = 3
         for i, (kind, item) in enumerate(cards):
-            card = W.Card(self.grid_wrap)
-            card.grid(row=i // cols, column=i % cols, padx=8, pady=8, sticky="nsew")
+            card = W.Card(self.grid_wrap, hover=(kind != "default"))
+            card.grid(row=i // cols, column=i % cols, padx=7, pady=7, sticky="nsew")
             self.grid_wrap.grid_columnconfigure(i % cols, weight=1)
             inner = ctk.CTkFrame(card, fg_color="transparent")
-            inner.pack(fill="both", expand=True, padx=14, pady=12)
+            inner.pack(fill="both", expand=True, padx=14, pady=14)
 
             if kind == "default":
-                ctk.CTkLabel(inner, text="🪟", font=W.fnt(34)).pack()
-                ctk.CTkLabel(inner, text="Windows Padrão", font=W.fnt(13, "bold"),
-                             text_color=self.t["text"]).pack()
-                ctk.CTkLabel(inner, text="volta aos cursores originais", font=W.fnt(10),
-                             text_color=self.t["sub"]).pack(pady=(0, 8))
+                t = self.t
                 is_default = active in ("", "windows padrão")
-                btn = W.primary_button(inner, "✔ Ativo" if is_default else "Aplicar",
-                                       self._restore_default if not is_default else (lambda: None),
-                                       width=120, state="normal" if not is_default else "disabled")
-                btn.pack()
+                if is_default:
+                    card.configure(border_color=t["accent"], border_width=2)
+                self._pack_card_visual(inner, "🖥️", "Windows Padrão", "cursores originais")
+                if is_default:
+                    W.primary_button(inner, "✔ Ativo", (lambda: None), width=118,
+                                     state="disabled").pack()
+                else:
+                    W.primary_button(inner, "Aplicar", self._restore_default, width=118).pack()
                 continue
 
             if kind == "dl":
                 kd = item
-                ctk.CTkLabel(inner, text="⬇️", font=W.fnt(34)).pack()
-                ctk.CTkLabel(inner, text=kd["title"], font=W.fnt(13, "bold"),
-                             text_color=self.t["text"]).pack()
-                st = ctk.CTkLabel(inner, text="não instalado", font=W.fnt(10),
-                                  text_color=self.t["sub"])
-                st.pack(pady=(0, 6))
+                self._pack_card_visual(inner, "⬇️", kd["title"], "não instalado")
+                st = ctk.CTkLabel(inner, text="", font=W.fnt(10), text_color=self.t["sub"])
+                st.pack()
                 self._dl_status[kd["key"]] = st
-                W.ghost_button(inner, "Baixar", lambda k=kd: self._download_one(k), width=120).pack()
+                W.ghost_button(inner, "Baixar", lambda k=kd: self._download_one(k),
+                               width=118).pack(pady=(4, 0))
                 continue
 
             pack = item
+            t = self.t
             is_active = pack["name"].lower() == active
+            if is_active:
+                card.configure(border_color=t["accent"], border_width=2)
+            emoji = "🖱️"
             if pack.get("arrow") is not None:
                 try:
                     img = pack["arrow"].copy()
                     img.thumbnail((PREVIEW_PX * 2, PREVIEW_PX * 2), Image.LANCZOS)
                     cimg = ctk.CTkImage(img, size=(img.width, img.height))
                     self._imgs.append(cimg)
-                    ctk.CTkLabel(inner, image=cimg, text="").pack(pady=2)
+                    well = W.preview_well(inner, 96)
+                    well.pack(pady=(2, 8))
+                    ctk.CTkLabel(well, image=cimg, text="").place(relx=0.5, rely=0.5,
+                                                                  anchor="center")
                 except Exception:
-                    ctk.CTkLabel(inner, text="🖱️", font=W.fnt(34)).pack()
+                    self._pack_card_visual(inner, emoji, pack["name"],
+                                           f"{len(pack['roles'])} cursores")
+                    self._pack_apply_btn(inner, pack, is_active)
+                    continue
             else:
-                ctk.CTkLabel(inner, text="🖱️", font=W.fnt(34)).pack()
+                well = W.preview_well(inner, 96)
+                well.pack(pady=(2, 8))
+                ctk.CTkLabel(well, text=emoji, font=W.fnt(36)).place(relx=0.5, rely=0.5,
+                                                                     anchor="center")
             ctk.CTkLabel(inner, text=pack["name"], font=W.fnt(13, "bold"),
-                         text_color=self.t["text"], wraplength=180).pack()
+                         text_color=t["text"], wraplength=190).pack()
             ctk.CTkLabel(inner, text=f"{len(pack['roles'])} cursores", font=W.fnt(10),
-                         text_color=self.t["sub"]).pack(pady=(0, 6))
-            if is_active:
-                W.primary_button(inner, "✔ Ativo", (lambda: None), width=120,
-                                 state="disabled").pack()
-            else:
-                W.primary_button(inner, "Aplicar",
-                                 lambda p=pack: self._apply_pack(p), width=120).pack()
+                         text_color=t["sub"]).pack(pady=(1, 8))
+            self._pack_apply_btn(inner, pack, is_active)
+
+    def _pack_apply_btn(self, inner, pack, is_active):
+        if is_active:
+            W.primary_button(inner, "✔ Ativo", (lambda: None), width=118,
+                             state="disabled").pack()
+        else:
+            W.primary_button(inner, "Aplicar",
+                             lambda p=pack: self._apply_pack(p), width=118).pack()
 
     def _apply_pack(self, pack):
         try:
@@ -172,6 +201,7 @@ class MousePage:
     def _restore_default(self):
         try:
             cursors.restore_windows_default()
+            self._toast("Cursores voltaram ao padrão do Windows")
             self.app.after(150, lambda: self.mw.show("mouse"))
         except Exception as e:
             self._toast(f"Falha ao restaurar: {e}", err=True)
@@ -196,19 +226,19 @@ class MousePage:
         q: queue.Queue = queue.Queue()
 
         def work():
-            dl = downloader.Downloader([{**kd, "weight": 1}], q)
-            dl.run()
+            downloader.Downloader([{**kd, "weight": 1}], q).run()
 
         W.bg_call(self.grid_wrap, work,
                   on_done=lambda _: None,
-                  on_error=lambda e: st and st.configure(text=f"erro: {e}", text_color=self.t["danger"]))
+                  on_error=lambda e: st and st.configure(text=f"erro: {e}",
+                                                         text_color=self.t["danger"]))
 
         def poll():
             try:
                 ev, *rest = q.get_nowait()
                 if ev == "done":
                     self._toast(f"{kd['title']} instalado!")
-                    self.mw.show("mouse")
+                    self.app.after(100, lambda: self.mw.show("mouse"))
                     return
                 if ev == "item_state" and rest[1] == "err":
                     st.configure(text=f"erro: {rest[2][:60]}", text_color=self.t["danger"])
@@ -235,7 +265,6 @@ class MousePage:
         self._load_custom_image(path)
 
     def _load_custom_image(self, path):
-        from ...core import curio
         img, _ = curio.read_cursor_file(path)
         self._custom_img = img
         self._custom_path = path
@@ -249,21 +278,22 @@ class MousePage:
 
     def _draw_preview(self):
         c = self.preview
+        t = self.t
         if self._custom_img is None:
             c.delete("all")
-            c.create_text(70, 60, text="🖼️", font=("Segoe UI Emoji", 28), fill=self.t["sub"])
-            c.create_text(70, 100, text="escolha uma imagem", font=("Segoe UI", 10), fill=self.t["sub"])
+            c.create_text(62, 48, text="🖼️", font=("Segoe UI Emoji", 26), fill=t["sub"])
+            c.create_text(62, 88, text="escolha uma imagem", font=("Segoe UI", 10), fill=t["sub"])
             return
         img = self._custom_img.copy()
-        img.thumbnail((120, 120), Image.LANCZOS)
-        self._ph = ctk.CTkImage(img, size=(img.width, img.height))
+        img.thumbnail((110, 110), Image.LANCZOS)
+        self._ph = ImageTk.PhotoImage(img)
         self._imgs.append(self._ph)
         c.delete("all")
-        c.create_image(70, 70, image=self._ph)
+        c.create_image(62, 62, image=self._ph)
         hx = int(self._hotspot[0] * img.width)
         hy = int(self._hotspot[1] * img.height)
-        x0 = 70 - img.width // 2
-        y0 = 70 - img.height // 2
+        x0 = 62 - img.width // 2
+        y0 = 62 - img.height // 2
         c.create_oval(x0 + hx - 5, y0 + hy - 5, x0 + hx + 5, y0 + hy + 5,
                       outline="#FF5C7A", width=2)
         c.create_line(x0 + hx - 9, y0 + hy, x0 + hx + 9, y0 + hy, fill="#FF5C7A", width=1)
@@ -273,9 +303,9 @@ class MousePage:
         if self._custom_img is None:
             return
         img = self._custom_img.copy()
-        img.thumbnail((120, 120), Image.LANCZOS)
-        x0 = 70 - img.width // 2
-        y0 = 70 - img.height // 2
+        img.thumbnail((110, 110), Image.LANCZOS)
+        x0 = 62 - img.width // 2
+        y0 = 62 - img.height // 2
         px = max(0, min(img.width - 1, ev.x - x0))
         py = max(0, min(img.height - 1, ev.y - y0))
         self._hotspot = (px / img.width, py / img.height)
@@ -294,18 +324,27 @@ class MousePage:
             self.apply_custom_btn.configure(state="normal", text="✅  Aplicar meu cursor")
             self.custom_status.configure(text=f"erro: {e}", text_color=self.t["danger"])
 
+    # ------------------------------------------------------------- toast
+
     def _toast(self, msg, err=False):
-        top = ctk.CTkToplevel(self.app)
-        top.withdraw()
-        top.overrideredirect(True)
-        t = self.t
-        fr = ctk.CTkFrame(top, corner_radius=12, fg_color=t["danger"] if err else t["accent"])
-        fr.pack(padx=2, pady=2)
-        ctk.CTkLabel(fr, text=msg, font=W.fnt(12, "bold"),
-                     text_color=t["on_accent"]).pack(padx=16, pady=10)
-        sw, sh = self.app.winfo_screenwidth(), self.app.winfo_screenheight()
-        top.update_idletasks()
-        w, h = top.winfo_reqwidth(), top.winfo_reqheight()
-        top.geometry(f"+{sw - w - 30}+{sh - h - 60}")
-        top.deiconify()
-        top.after(2600, top.destroy)
+        try:
+            top = ctk.CTkToplevel(self.app)
+            top.withdraw()
+            top.overrideredirect(True)
+            top.attributes("-topmost", True)
+            t = self.t
+            fr = ctk.CTkFrame(top, corner_radius=14,
+                              fg_color=t["danger"] if err else t["button"],
+                              border_width=1, border_color=t["border"])
+            fr.pack(padx=3, pady=3)
+            icon = "⚠️ " if err else "✅ "
+            ctk.CTkLabel(fr, text=f"{icon}{msg}", font=W.fnt(12, "bold"),
+                         text_color=t["on_button"] if not err else "#FFFFFF").pack(padx=18, pady=12)
+            sw, sh = self.app.winfo_screenwidth(), self.app.winfo_screenheight()
+            top.update_idletasks()
+            w, h = top.winfo_reqwidth(), top.winfo_reqheight()
+            top.geometry(f"+{(sw - w) // 2}+{sh - h - 80}")
+            top.deiconify()
+            top.after(2600, top.destroy)
+        except Exception:
+            pass

@@ -13,8 +13,6 @@ import time
 IS_WINDOWS = sys.platform == "win32"
 
 if IS_WINDOWS:
-    from ctypes import wintypes
-
     _u32 = ctypes.WinDLL("user32", use_last_error=True)
     _g32 = ctypes.WinDLL("gdi32", use_last_error=True)
     _sh32 = ctypes.WinDLL("shell32", use_last_error=True)
@@ -24,6 +22,10 @@ if IS_WINDOWS:
         _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
     GWL_EXSTYLE = -20
+    GWLP_WNDPROC = -4
+    WM_NCHITTEST = 0x0084
+    HTTRANSPARENT = -1
+
     WS_EX_LAYERED = 0x00080000
     WS_EX_TRANSPARENT = 0x00000020
     WS_EX_TOOLWINDOW = 0x00000080
@@ -34,6 +36,23 @@ if IS_WINDOWS:
     SPI_SETCURSORS = 0x0057
     SPIF_UPDATEINIFILE = 0x01
     SPIF_SENDCHANGE = 0x02
+
+    _LRESULT = ctypes.c_ssize_t
+    _WNDPROC = ctypes.WINFUNCTYPE(
+        _LRESULT, ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t)
+
+    _GetWindowLongPtr = getattr(_u32, "GetWindowLongPtrW", None) or _u32.GetWindowLongW
+    _SetWindowLongPtr = getattr(_u32, "SetWindowLongPtrW", None) or _u32.SetWindowLongW
+    _GetWindowLongPtr.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    _GetWindowLongPtr.restype = _LRESULT
+    _SetWindowLongPtr.argtypes = [ctypes.c_void_p, ctypes.c_int, _LRESULT]
+    _SetWindowLongPtr.restype = _LRESULT
+    _u32.CallWindowProcW.argtypes = [_LRESULT, ctypes.c_void_p, ctypes.c_uint,
+                                     ctypes.c_size_t, ctypes.c_ssize_t]
+    _u32.CallWindowProcW.restype = _LRESULT
+
+# subclasses ativos: hwnd -> (callback, proc_original)
+_SUBCLASS: dict[int, tuple] = {}
 
 
 def _noop(*a, **k):
@@ -67,20 +86,75 @@ def virtual_screen() -> tuple[int, int, int, int]:
     return x, y, max(1, w), max(1, h)
 
 
+def _hit_transparent_proc(orig: int):
+    """WNDPROC que responde HTTRANSPARENT ao WM_NCHITTEST: obriga o Windows a
+    entregar TODO e qualquer evento de mouse à janela que está por baixo,
+    inclusive sobre pixels com partículas desenhadas."""
+    def proc(hwnd, msg, wparam, lparam):
+        try:
+            if msg == WM_NCHITTEST:
+                return HTTRANSPARENT
+            return _u32.CallWindowProcW(orig, hwnd, msg, wparam, lparam)
+        except Exception:
+            return 0
+    return _WNDPROC(proc)
+
+
 def make_clickthrough(hwnd: int) -> None:
-    """Torna a janela transparente a cliques (efeitos não bloqueiam o mouse)."""
+    """Torna a janela 100% invisível ao mouse (estilos + subclass de NCHITTEST).
+
+    Idempotente: pode ser chamada várias vezes (a subclasse é instalada 1x por
+    janela; os estilos são reaplicados).
+    """
     if not IS_WINDOWS or not hwnd:
         return
-    user32 = _u32
-    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    style |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+    h = int(hwnd)
+    try:
+        style = int(_GetWindowLongPtr(h, GWL_EXSTYLE))
+        style |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+        _SetWindowLongPtr(h, GWL_EXSTYLE, _LRESULT(style))
+        if h not in _SUBCLASS:
+            orig = int(_GetWindowLongPtr(h, GWLP_WNDPROC))
+            cb = _hit_transparent_proc(orig)
+            prev = _SetWindowLongPtr(h, GWLP_WNDPROC,
+                                     _LRESULT(ctypes.cast(cb, ctypes.c_void_p).value))
+            _SUBCLASS[h] = (cb, prev)
+    except Exception:
+        pass
+
+
+def reassert_clickthrough(hwnd: int) -> None:
+    """Reaplica os estilos de click-through (barato; usado no loop de efeitos)."""
+    if not IS_WINDOWS or not hwnd:
+        return
+    h = int(hwnd)
+    try:
+        style = int(_GetWindowLongPtr(h, GWL_EXSTYLE))
+        want = style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+        if style != want:
+            _SetWindowLongPtr(h, GWL_EXSTYLE, _LRESULT(want))
+    except Exception:
+        pass
+
+
+def release_clickthrough(hwnd: int) -> None:
+    """Remove a subclasse (devolve o WNDPROC original) antes de destruir a janela."""
+    if not IS_WINDOWS or not hwnd:
+        return
+    info = _SUBCLASS.pop(int(hwnd), None)
+    if info:
+        cb, prev = info
+        try:
+            _SetWindowLongPtr(int(hwnd), GWLP_WNDPROC, _LRESULT(prev))
+        except Exception:
+            pass
 
 
 def toplevel_hwnd(widget) -> int:
     """HWND real da janela top-level de um widget do tkinter."""
     try:
-        hwnd = int(widget.winfo_id(), 16) if isinstance(widget.winfo_id(), str) else int(widget.winfo_id())
+        wid = widget.winfo_id()
+        hwnd = int(wid, 16) if isinstance(wid, str) else int(wid)
     except Exception:
         return 0
     if IS_WINDOWS:

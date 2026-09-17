@@ -44,7 +44,8 @@ Clique em **“Mais informações” → “Executar assim mesmo”**.
 | 🧪 **Autoteste** | `python run.py --selftest` valida núcleo e interface antes de cada build |
 
 > ℹ️ Os efeitos de clique e as trilhas funcionam **enquanto o Custom MF estiver
-> aberto** (ele desenha por cima da tela sem atrapalhar seus cliques).
+> aberto** — e **nunca atrapalham**: cliques, scroll e arrastos passam direto
+> através das animações (overlay 100% click-through).
 > A troca de cursor e a fonte **fixam no sistema** — a fonte aparece por completo
 > após sair da sessão do Windows.
 

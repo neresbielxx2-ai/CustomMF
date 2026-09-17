@@ -16,15 +16,16 @@ class TrailsPage:
         self.t = W.T()
         self.engine = None
         self._last = None
+        self.type_btns: dict[str, ctk.CTkButton] = {}
 
     def build(self, parent):
         t = self.t
         wrap = ctk.CTkScrollableFrame(parent, fg_color="transparent")
-        wrap.pack(fill="both", expand=True, padx=30, pady=(22, 10))
+        wrap.pack(fill="both", expand=True, padx=30, pady=(22, 14))
 
         W.section_header(wrap, "🌈", "Trilhas Animadas",
-                         "Um rastro de partículas que segue o seu cursor por toda a tela. "
-                         "O app precisa continuar aberto.").pack(fill="x")
+                         "Um rastro de partículas que segue o seu cursor por toda a tela — "
+                         "sem atrapalhar cliques nem scroll. Deixe o app aberto.").pack(fill="x")
 
         toggle = W.ToggleRow(wrap, "Ativar trilha do mouse",
                              "partículas surgem conforme você move o cursor",
@@ -40,65 +41,58 @@ class TrailsPage:
                      text_color=t["text"]).pack(anchor="w", pady=(0, 8))
         grid = ctk.CTkFrame(box, fg_color="transparent")
         grid.pack(fill="x")
-        self.type_btns = {}
         cur = config.get("fx.trail_type", "neon")
         for i, key in enumerate(particles.TRAIL_TYPES):
-            b = self._type_btn(grid, key, cur == key)
+            b = W.type_button(grid, particles.TRAIL_LABELS[key], cur == key,
+                              lambda k=key: self._set_type(k))
             b.grid(row=i // 4, column=i % 4, padx=5, pady=5, sticky="ew")
             grid.grid_columnconfigure(i % 4, weight=1)
+            self.type_btns[key] = b
 
         opts = W.Card(wrap)
         opts.pack(fill="x", pady=(0, 14))
         inner = ctk.CTkFrame(opts, fg_color="transparent")
         inner.pack(fill="x", padx=16, pady=14)
-        self.color_row = W.ColorRow(inner, "Cor da trilha",
-                                    value=config.get("fx.trail_color", "#3DDC97"),
-                                    rainbow=config.get("fx.trail_color") == "rainbow",
-                                    on_change=self._set_color)
-        self.color_row.pack(fill="x", pady=(0, 10))
-        self.size_row = W.SliderRow(inner, "Tamanho das partículas", 0.5, 2.5,
-                                    config.get("fx.trail_size", 1.0), command=self._set_size)
-        self.size_row.pack(fill="x", pady=(0, 6))
-        self.density_row = W.SliderRow(inner, "Densidade", 1, 5, config.get("fx.trail_density", 3),
-                                       fmt=lambda v: f"{int(v)}/5", steps=4, command=self._set_density)
-        self.density_row.pack(fill="x", pady=(0, 6))
-        self.dur_row = W.SliderRow(inner, "Duração do rastro", 0.5, 2.0,
-                                   config.get("fx.trail_duration", 1.0), command=self._set_duration)
-        self.dur_row.pack(fill="x")
+        W.ColorRow(inner, "Cor da trilha",
+                   value=config.get("fx.trail_color", "#3DDC97"),
+                   rainbow=config.get("fx.trail_color") == "rainbow",
+                   on_change=self._set_color).pack(fill="x", pady=(0, 12))
+        W.SliderRow(inner, "Tamanho das partículas", 0.5, 2.5,
+                    config.get("fx.trail_size", 1.0), command=self._set_size
+                    ).pack(fill="x", pady=(0, 8))
+        W.SliderRow(inner, "Densidade", 1, 5, config.get("fx.trail_density", 3),
+                    fmt=lambda v: f"{int(v)}/5", steps=4, command=self._set_density
+                    ).pack(fill="x", pady=(0, 8))
+        W.SliderRow(inner, "Duração do rastro", 0.5, 2.0,
+                    config.get("fx.trail_duration", 1.0), command=self._set_duration).pack(fill="x")
 
+        # preview
         prev_card = W.Card(wrap)
         prev_card.pack(fill="x")
         pbox = ctk.CTkFrame(prev_card, fg_color="transparent")
         pbox.pack(fill="both", expand=True, padx=16, pady=14)
-        ctk.CTkLabel(pbox, text="Teste ao vivo", font=W.fnt(13, "bold"),
-                     text_color=t["text"]).pack(anchor="w")
-        self.preview = tk.Canvas(pbox, height=200, bg=t["bg_deep"], highlightthickness=1,
-                                 highlightbackground=t["border"])
-        self.preview.pack(fill="x", pady=(10, 0))
-        ctk.CTkLabel(pbox, text="👆 passe o mouse pela área para ver a trilha",
-                     font=W.fnt(10), text_color=t["sub"]).pack(anchor="center", pady=(4, 0))
+        row = ctk.CTkFrame(pbox, fg_color="transparent")
+        row.pack(fill="x")
+        ctk.CTkLabel(row, text="Teste ao vivo", font=W.fnt(13, "bold"),
+                     text_color=t["text"]).pack(side="left")
+        W.chip(row, "passe o mouse pela área 👇", t["success"]).pack(side="left", padx=10)
+        well = ctk.CTkFrame(pbox, corner_radius=14, fg_color=t["bg_deep"],
+                            border_width=1, border_color=t["border"])
+        well.pack(fill="x", pady=(12, 0))
+        self.preview = tk.Canvas(well, height=200, bg=t["bg_deep"], highlightthickness=0)
+        self.preview.pack(fill="both", expand=True, padx=2, pady=2)
 
         self.engine = particles.Engine(particles.CanvasAdapter(self.preview))
         self.preview.bind("<Motion>", self._preview_motion)
         self._loop()
 
-    def _type_btn(self, parent, key, selected):
+    def _set_type(self, key):
         t = self.t
-        label = particles.TRAIL_LABELS[key]
-
-        def cmd():
-            config.set("fx.trail_type", key)
-            for k, b in self.type_btns.items():
-                b.configure(fg_color=t["accent"] if k == key else t["hover_soft"],
-                            text_color=t["on_accent"] if k == key else t["text"])
-
-        b = ctk.CTkButton(parent, text=label, height=36, corner_radius=10, font=W.fnt(12, "bold"),
-                          command=cmd,
-                          fg_color=t["accent"] if selected else t["hover_soft"],
-                          hover_color=t["border"],
-                          text_color=t["on_accent"] if selected else t["text"])
-        self.type_btns[key] = b
-        return b
+        config.set("fx.trail_type", key)
+        for k, b in self.type_btns.items():
+            sel = k == key
+            b.configure(fg_color=t["accent"] if sel else t["hover_soft"],
+                        text_color=t["on_accent"] if sel else t["text"])
 
     def _toggle(self, on):
         config.set("fx.trail_enabled", on)

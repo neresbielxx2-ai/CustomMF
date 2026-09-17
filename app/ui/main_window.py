@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import customtkinter as ctk
+from PIL import Image
 
 from .. import __version__
-from ..core import config, iconpacks, theme
+from ..core import config, iconpacks, paths, theme
 from . import widgets as W
 from .pages.click_page import ClickPage
 from .pages.font_page import FontPage
@@ -46,36 +47,50 @@ class MainWindow:
 
     # ------------------------------------------------------------ build
 
+    def _logo_image(self, size: int):
+        try:
+            img = Image.open(paths.asset("logo.png")).convert("RGBA")
+            cimg = ctk.CTkImage(img, size=(size, size))
+            self._imgs.append(cimg)
+            return cimg
+        except Exception:
+            return None
+
     def build(self):
         t = W.T()
         self.wrap = ctk.CTkFrame(self.app, fg_color=t["bg"], corner_radius=0)
         self.wrap.pack(fill="both", expand=True)
 
-        self.sidebar = ctk.CTkFrame(self.wrap, width=232, corner_radius=0, fg_color=t["surface"])
+        # ---------------- sidebar
+        self.sidebar = ctk.CTkFrame(self.wrap, width=246, corner_radius=0, fg_color=t["surface"])
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
 
         head = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        head.pack(fill="x", padx=18, pady=(20, 6))
-        ctk.CTkLabel(head, text=iconpacks.glyph("mouse", "🖱️") + "  Custom MF",
-                     font=W.fnt(19, "bold"), text_color=t["text"]).pack(side="left")
-        ctk.CTkLabel(self.sidebar, text="personalize seu Windows", font=W.fnt(10),
-                     text_color=t["sub"], anchor="w").pack(fill="x", padx=22)
+        head.pack(fill="x", padx=18, pady=(20, 2))
+        logo = self._logo_image(44)
+        if logo:
+            ctk.CTkLabel(head, image=logo, text="").pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(head, text="Custom MF", font=W.fnt(20, "bold"),
+                     text_color=t["text"]).pack(side="left")
+        ctk.CTkLabel(self.sidebar, text="deixe o Windows com a sua cara",
+                     font=W.fnt(10), text_color=t["sub"], anchor="w").pack(fill="x", padx=22)
 
-        ctk.CTkFrame(self.sidebar, height=1, fg_color=t["border"]).pack(fill="x", padx=14, pady=10)
+        ctk.CTkFrame(self.sidebar, height=1, fg_color=t["border"]).pack(fill="x", padx=16, pady=12)
 
         self.nav_box = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.nav_box.pack(fill="x", padx=10)
+        self.nav_box.pack(fill="x", padx=12)
         for key, label, icon_key in NAV:
             self._nav_btns[key] = self._nav_button(self.nav_box, key, label, icon_key)
 
         bottom = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        bottom.pack(side="bottom", fill="x", padx=14, pady=14)
+        bottom.pack(side="bottom", fill="x", padx=16, pady=16)
         theme_txt = "☀️  Tema claro" if t["dark"] else "🌙  Tema escuro"
         W.ghost_button(bottom, theme_txt, self.toggle_theme).pack(fill="x")
-        ctk.CTkLabel(bottom, text=f"versão {__version__}", font=W.fnt(10),
-                     text_color=t["sub"]).pack(pady=(8, 0))
+        ctk.CTkLabel(bottom, text=f"versão {__version__} · feito com 💜", font=W.fnt(10),
+                     text_color=t["sub"]).pack(pady=(10, 0))
 
+        # ---------------- conteúdo
         self.container = ctk.CTkFrame(self.wrap, fg_color="transparent", corner_radius=0)
         self.container.pack(side="left", fill="both", expand=True)
         self.show(self.current)
@@ -86,7 +101,7 @@ class MainWindow:
         glyph = iconpacks.glyph(icon_key, "•")
         txt = f" {glyph}   {label}"
         btn = ctk.CTkButton(
-            parent, text=txt, anchor="w", height=42, corner_radius=10,
+            parent, text=txt, anchor="w", height=42, corner_radius=12,
             font=W.fnt(13, "bold" if active else "normal"),
             fg_color=t["accent"] if active else "transparent",
             hover_color=t["accent"] if active else t["hover_soft"],

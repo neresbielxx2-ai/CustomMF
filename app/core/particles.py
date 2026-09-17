@@ -40,11 +40,13 @@ def rainbow(t: float) -> str:
 
 
 CLICK_TYPES = ["onda", "pulso", "faiscas", "estrelas", "coracoes", "flash", "fogos"]
-CLICK_LABELS = {"onda": "Onda", "pulso": "Pulso", "faiscas": "Faíscas", "estrelas": "Estrelas",
-                "coracoes": "Corações", "flash": "Flash", "fogos": "Fogos"}
+CLICK_LABELS = {"onda": "🌊  Onda", "pulso": "💠  Pulso", "faiscas": "✨  Faíscas",
+                "estrelas": "⭐  Estrelas", "coracoes": "💜  Corações", "flash": "⚡  Flash",
+                "fogos": "🎆  Fogos"}
 TRAIL_TYPES = ["neon", "arcoiris", "bolhas", "estrelas", "coracoes", "fogo", "po"]
-TRAIL_LABELS = {"neon": "Neon", "arcoiris": "Arco-íris", "bolhas": "Bolhas", "estrelas": "Estrelas",
-                "coracoes": "Corações", "fogo": "Fogo", "po": "Pó de estrela"}
+TRAIL_LABELS = {"neon": "💫  Neon", "arcoiris": "🌈  Arco-íris", "bolhas": "🔵  Bolhas",
+                "estrelas": "⭐  Estrelas", "coracoes": "💜  Corações", "fogo": "🔥  Fogo",
+                "po": "✨  Pó de estrela"}
 
 
 class Adapter:

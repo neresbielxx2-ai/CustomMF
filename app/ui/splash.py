@@ -224,7 +224,6 @@ class Splash:
             wdg.destroy()
         ok_canvas = tk.Canvas(self.stage, width=86, height=86, bg=t["bg"], highlightthickness=0)
         ok_canvas.pack(pady=(0, 10))
-        arc_start = 0
         pct = {"v": 0}
 
         title = "Tudo pronto!" if not errors else "Pronto (com avisos)"
@@ -236,7 +235,6 @@ class Splash:
                      justify="center").pack(pady=(2, 8))
 
         def draw_check():
-            nonlocal arc_start
             try:
                 if not ok_canvas.winfo_exists():
                     return
